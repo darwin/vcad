@@ -165,7 +165,7 @@ pub fn tessellate_solid(brep: &BRepSolid, params: &TessellationParams) -> Triang
 }
 
 /// Tessellate a single B-rep face.
-fn tessellate_face(
+pub fn tessellate_face(
     topo: &Topology,
     geom: &GeometryStore,
     face_id: FaceId,
