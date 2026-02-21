@@ -1354,4 +1354,44 @@ mod tests {
             bad.len()
         );
     }
+
+    /// Boolean union of two coplanar boxes retains internal faces at the shared junction.
+    ///
+    /// Two cuboids sharing a coplanar face (z=25) should produce a single 10×10×60 cuboid
+    /// with 6 outer faces. Instead the outer shell contains 12 faces: the 4 side faces
+    /// are split at z=25 (cosmetic) plus 2 spurious internal faces at the junction,
+    /// creating non-manifold edges (3 incident faces per edge at z=25).
+    ///
+    /// See: boolean-union-coplanar-bug.md
+    #[test]
+    fn test_union_coplanar_no_internal_faces() {
+        let bottom = make_cube(10.0, 10.0, 25.0);
+        let mut top = make_cube(10.0, 10.0, 35.0);
+        translate_brep(&mut top, 0.0, 0.0, 25.0);
+
+        let result = boolean_op(&bottom, &top, BooleanOp::Union, 32);
+
+        // Volume should be correct: 10 * 10 * 60 = 6000
+        let mesh = result.to_mesh(32);
+        let volume = compute_mesh_volume(&mesh);
+        assert!(
+            (volume - 6000.0).abs() < 10.0,
+            "Union volume should be 6000, got {:.1}",
+            volume
+        );
+
+        // The outer shell must have exactly 6 faces (no internal partition)
+        let brep = result
+            .as_brep()
+            .expect("coplanar box union should produce BRep, not mesh fallback");
+        let solid = &brep.topology.solids[brep.solid_id];
+        let shell = &brep.topology.shells[solid.outer_shell];
+        assert_eq!(
+            shell.faces.len(),
+            6,
+            "Expected 6 outer faces for a 10x10x60 cuboid, got {} \
+             (internal coplanar faces not removed)",
+            shell.faces.len()
+        );
+    }
 }
