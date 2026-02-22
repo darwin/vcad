@@ -540,10 +540,27 @@ fn evaluate_op_timed(
             Ok(Some(solid))
         }
 
-        CsgOp::ImportedMesh { .. } => {
-            // ImportedMesh is handled at the document level via find_imported_mesh.
-            // If we reach here directly, return empty.
-            Ok(None)
+        CsgOp::ImportedMesh {
+            positions,
+            indices,
+            normals,
+            ..
+        } => {
+            // Convert to a BRep Solid so ImportedMesh can participate in CSG
+            // boolean operations (union, difference, intersection).
+            // The document-level fast path (find_imported_mesh) handles
+            // root-level ImportedMesh without BRep conversion.
+            let vertices: Vec<f32> = positions.iter().map(|&v| v as f32).collect();
+            let normals_f32: Vec<f32> = normals
+                .as_ref()
+                .map(|n| n.iter().map(|&v| v as f32).collect())
+                .unwrap_or_default();
+            let mesh = TriangleMesh {
+                vertices,
+                indices: indices.clone(),
+                normals: normals_f32,
+            };
+            Ok(Some(Solid::from_mesh(mesh)))
         }
 
         CsgOp::StepImport { path } => Ok(Solid::from_step(path).ok()),
