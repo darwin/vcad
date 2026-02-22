@@ -44,7 +44,9 @@
   [LoftClosed (Vec Sketch)]
   ; Patterns
   [LinearPattern Solid f64 f64 f64 Int f64]
-  [CircularPattern Solid f64 f64 f64 f64 f64 f64 Int f64]]
+  [CircularPattern Solid f64 f64 f64 f64 f64 f64 Int f64]
+  ; Imported mesh (positions, indices, normals)
+  [ImportedMesh (Vec f64) (Vec Int) (Vec f64)]]
 
 ; ---------------------------------------------------------------------------
 ; Sketch — 2D profiles for extrude/revolve

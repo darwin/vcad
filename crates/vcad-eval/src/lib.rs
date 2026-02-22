@@ -776,4 +776,146 @@ mod tests {
         assert_eq!(scene.parts[0].mesh.positions.len(), 9);
         assert_eq!(scene.parts[0].mesh.indices.len(), 3);
     }
+
+    /// Build a simple tetrahedron ImportedMesh for testing CSG participation.
+    fn make_tetrahedron_mesh() -> CsgOp {
+        // A small tetrahedron centered near origin
+        CsgOp::ImportedMesh {
+            positions: vec![
+                0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 5.0, 10.0, 0.0, 5.0, 5.0, 10.0,
+            ],
+            indices: vec![
+                0, 1, 2, // bottom
+                0, 1, 3, // front
+                1, 2, 3, // right
+                2, 0, 3, // left
+            ],
+            normals: None,
+            source: None,
+        }
+    }
+
+    #[test]
+    fn evaluate_imported_mesh_in_union() {
+        let mut doc = Document::new();
+        doc.nodes.insert(
+            1,
+            Node {
+                id: 1,
+                name: None,
+                op: CsgOp::Cube {
+                    size: Vec3::new(10.0, 10.0, 10.0),
+                },
+            },
+        );
+        doc.nodes.insert(
+            2,
+            Node {
+                id: 2,
+                name: None,
+                op: make_tetrahedron_mesh(),
+            },
+        );
+        doc.nodes.insert(
+            3,
+            Node {
+                id: 3,
+                name: None,
+                op: CsgOp::Union { left: 1, right: 2 },
+            },
+        );
+        doc.roots.push(SceneEntry {
+            root: 3,
+            material: "default".to_string(),
+            visible: None,
+        });
+
+        let scene = evaluate_document(&doc, &EvalOptions::default()).unwrap();
+        assert_eq!(scene.parts.len(), 1);
+        assert!(!scene.parts[0].mesh.positions.is_empty());
+        // Union should produce geometry — solid must be present
+        assert!(scene.parts[0].solid.is_some());
+    }
+
+    #[test]
+    fn evaluate_imported_mesh_in_difference() {
+        let mut doc = Document::new();
+        doc.nodes.insert(
+            1,
+            Node {
+                id: 1,
+                name: None,
+                op: CsgOp::Cube {
+                    size: Vec3::new(20.0, 20.0, 20.0),
+                },
+            },
+        );
+        doc.nodes.insert(
+            2,
+            Node {
+                id: 2,
+                name: None,
+                op: make_tetrahedron_mesh(),
+            },
+        );
+        doc.nodes.insert(
+            3,
+            Node {
+                id: 3,
+                name: None,
+                op: CsgOp::Difference { left: 1, right: 2 },
+            },
+        );
+        doc.roots.push(SceneEntry {
+            root: 3,
+            material: "default".to_string(),
+            visible: None,
+        });
+
+        let scene = evaluate_document(&doc, &EvalOptions::default()).unwrap();
+        assert_eq!(scene.parts.len(), 1);
+        assert!(!scene.parts[0].mesh.positions.is_empty());
+        assert!(scene.parts[0].solid.is_some());
+    }
+
+    #[test]
+    fn evaluate_imported_mesh_in_intersection() {
+        let mut doc = Document::new();
+        doc.nodes.insert(
+            1,
+            Node {
+                id: 1,
+                name: None,
+                op: CsgOp::Cube {
+                    size: Vec3::new(20.0, 20.0, 20.0),
+                },
+            },
+        );
+        doc.nodes.insert(
+            2,
+            Node {
+                id: 2,
+                name: None,
+                op: make_tetrahedron_mesh(),
+            },
+        );
+        doc.nodes.insert(
+            3,
+            Node {
+                id: 3,
+                name: None,
+                op: CsgOp::Intersection { left: 1, right: 2 },
+            },
+        );
+        doc.roots.push(SceneEntry {
+            root: 3,
+            material: "default".to_string(),
+            visible: None,
+        });
+
+        let scene = evaluate_document(&doc, &EvalOptions::default()).unwrap();
+        assert_eq!(scene.parts.len(), 1);
+        // Intersection of cube and tetrahedron should produce geometry
+        assert!(scene.parts[0].solid.is_some());
+    }
 }

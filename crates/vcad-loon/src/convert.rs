@@ -520,6 +520,7 @@ fn is_solid_tag(tag: &str) -> bool {
             | "SweepHelix"
             | "Loft"
             | "LoftClosed"
+            | "ImportedMesh"
     )
 }
 
@@ -584,6 +585,20 @@ impl ConvertCtx {
             self.f64_val(&fields[offset + 1])?,
             self.f64_val(&fields[offset + 2])?,
         ))
+    }
+
+    fn f64_vec(&self, v: &Value) -> Result<Vec<f64>, String> {
+        match v {
+            Value::Vec(items) => items.iter().map(|item| self.f64_val(item)).collect(),
+            _ => Err(format!("expected Vec of numbers, got {v}")),
+        }
+    }
+
+    fn u32_vec(&self, v: &Value) -> Result<Vec<u32>, String> {
+        match v {
+            Value::Vec(items) => items.iter().map(|item| self.u32_val(item)).collect(),
+            _ => Err(format!("expected Vec of integers, got {v}")),
+        }
     }
 
     fn convert_solid(&mut self, value: &Value) -> Result<NodeId, String> {
@@ -800,6 +815,20 @@ impl ConvertCtx {
                 CsgOp::Loft {
                     sketches,
                     closed: Some(true),
+                }
+            }
+
+            // Imported mesh (positions, indices, normals)
+            "ImportedMesh" => {
+                assert_fields(tag, fields, 3)?;
+                let positions = self.f64_vec(&fields[0])?;
+                let indices = self.u32_vec(&fields[1])?;
+                let normals = self.f64_vec(&fields[2])?;
+                CsgOp::ImportedMesh {
+                    positions,
+                    indices,
+                    normals: Some(normals),
+                    source: None,
                 }
             }
 
@@ -1341,6 +1370,91 @@ mod tests {
                 assert_eq!(*closed, Some(true));
             }
             _ => panic!("expected Loft"),
+        }
+    }
+
+    #[test]
+    fn imported_mesh_to_document() {
+        let positions = Value::Vec(vec![
+            f(0.0),
+            f(0.0),
+            f(0.0),
+            f(10.0),
+            f(0.0),
+            f(0.0),
+            f(0.0),
+            f(10.0),
+            f(0.0),
+        ]);
+        let indices = Value::Vec(vec![i(0), i(1), i(2)]);
+        let normals = Value::Vec(vec![
+            f(0.0),
+            f(0.0),
+            f(1.0),
+            f(0.0),
+            f(0.0),
+            f(1.0),
+            f(0.0),
+            f(0.0),
+            f(1.0),
+        ]);
+        let val = adt("ImportedMesh", vec![positions, indices, normals]);
+        let doc = value_to_document(&val).unwrap();
+        assert_eq!(doc.roots.len(), 1);
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[&0].op {
+            CsgOp::ImportedMesh {
+                positions,
+                indices,
+                normals,
+                source,
+            } => {
+                assert_eq!(positions.len(), 9);
+                assert_eq!(indices.len(), 3);
+                assert!(normals.is_some());
+                assert_eq!(normals.as_ref().unwrap().len(), 9);
+                assert!(source.is_none());
+            }
+            _ => panic!("expected ImportedMesh"),
+        }
+    }
+
+    #[test]
+    fn imported_mesh_in_difference() {
+        let cube = adt("Cube", vec![f(20.0), f(20.0), f(20.0)]);
+        let positions = Value::Vec(vec![
+            f(0.0),
+            f(0.0),
+            f(0.0),
+            f(5.0),
+            f(0.0),
+            f(0.0),
+            f(0.0),
+            f(5.0),
+            f(0.0),
+        ]);
+        let indices = Value::Vec(vec![i(0), i(1), i(2)]);
+        let normals = Value::Vec(vec![
+            f(0.0),
+            f(0.0),
+            f(1.0),
+            f(0.0),
+            f(0.0),
+            f(1.0),
+            f(0.0),
+            f(0.0),
+            f(1.0),
+        ]);
+        let mesh = adt("ImportedMesh", vec![positions, indices, normals]);
+        let diff = adt("Difference", vec![cube, mesh]);
+        let doc = value_to_document(&diff).unwrap();
+        assert_eq!(doc.nodes.len(), 3); // cube + imported_mesh + difference
+        match &doc.nodes[&2].op {
+            CsgOp::Difference { left, right } => {
+                assert_eq!(*left, 0); // cube
+                assert_eq!(*right, 1); // imported_mesh
+            }
+            _ => panic!("expected Difference"),
         }
     }
 
