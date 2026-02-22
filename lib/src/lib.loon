@@ -130,7 +130,9 @@
   ; [SheetHem parent panel edge kind length gap dir]
   [SheetHem Solid Int Any Str f64 f64 Str]
   ; [SheetBendRelief parent width depth]  (0.0 = kernel/shop default)
-  [SheetBendRelief Solid f64 f64]]
+  [SheetBendRelief Solid f64 f64]
+  ; Imported mesh (positions, indices, normals)
+  [ImportedMesh (Vec f64) (Vec Int) (Vec f64)]]
 
 ; ---------------------------------------------------------------------------
 ; Sheet-metal engraving — a marking pass on the base flange's outside face.
