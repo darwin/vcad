@@ -61,7 +61,11 @@ pub fn value_to_document(value: &Value) -> Result<Document, String> {
                 merge_value_into_doc(&mut ctx, item)?;
             }
         }
-        _ => return Err(format!("expected Solid, SceneEntry, Assembly, or Vec, got {value}")),
+        _ => {
+            return Err(format!(
+                "expected Solid, SceneEntry, Assembly, or Vec, got {value}"
+            ))
+        }
     }
 
     // Add default material if any root references it and it's missing
@@ -130,7 +134,11 @@ fn merge_value_into_doc(ctx: &mut ConvertCtx, value: &Value) -> Result<(), Strin
         Value::Adt(tag, _) if is_ecad_tag(tag) => {
             convert_ecad_value(ctx, value)?;
         }
-        _ => return Err(format!("expected SceneEntry, Material, Assembly, ECAD, or Solid in Vec, got {value}")),
+        _ => {
+            return Err(format!(
+                "expected SceneEntry, Material, Assembly, ECAD, or Solid in Vec, got {value}"
+            ))
+        }
     }
     Ok(())
 }
@@ -142,7 +150,12 @@ fn convert_assembly(ctx: &mut ConvertCtx, fields: &[Value]) -> Result<(), String
     // 1. Parts → PartDef + geometry nodes
     let parts = match &fields[0] {
         Value::Vec(v) => v,
-        _ => return Err(format!("Assembly: expected Vec of PartEntry, got {}", fields[0])),
+        _ => {
+            return Err(format!(
+                "Assembly: expected Vec of PartEntry, got {}",
+                fields[0]
+            ))
+        }
     };
 
     let mut part_defs = HashMap::new();
@@ -152,7 +165,10 @@ fn convert_assembly(ctx: &mut ConvertCtx, fields: &[Value]) -> Result<(), String
             _ => return Err(format!("expected PartEntry ADT, got {part_val}")),
         };
         if tag != "PartEntry" || pf.len() != 3 {
-            return Err(format!("expected PartEntry with 3 fields, got {tag}/{}", pf.len()));
+            return Err(format!(
+                "expected PartEntry with 3 fields, got {tag}/{}",
+                pf.len()
+            ));
         }
         let name = ctx.str_val(&pf[0])?;
         let root_id = ctx.convert_solid(&pf[1])?;
@@ -172,7 +188,12 @@ fn convert_assembly(ctx: &mut ConvertCtx, fields: &[Value]) -> Result<(), String
     // 2. Instances → Instance list
     let instances = match &fields[1] {
         Value::Vec(v) => v,
-        _ => return Err(format!("Assembly: expected Vec of InstanceEntry, got {}", fields[1])),
+        _ => {
+            return Err(format!(
+                "Assembly: expected Vec of InstanceEntry, got {}",
+                fields[1]
+            ))
+        }
     };
 
     let mut inst_list = Vec::new();
@@ -182,7 +203,10 @@ fn convert_assembly(ctx: &mut ConvertCtx, fields: &[Value]) -> Result<(), String
             _ => return Err(format!("expected InstanceEntry ADT, got {inst_val}")),
         };
         if tag != "InstanceEntry" || inf.len() != 5 {
-            return Err(format!("expected InstanceEntry with 5 fields, got {tag}/{}", inf.len()));
+            return Err(format!(
+                "expected InstanceEntry with 5 fields, got {tag}/{}",
+                inf.len()
+            ));
         }
         let id = ctx.str_val(&inf[0])?;
         let part_def_id = ctx.str_val(&inf[1])?;
@@ -212,7 +236,12 @@ fn convert_assembly(ctx: &mut ConvertCtx, fields: &[Value]) -> Result<(), String
     // 3. Joints → Joint list
     let joints = match &fields[2] {
         Value::Vec(v) => v,
-        _ => return Err(format!("Assembly: expected Vec of JointDef, got {}", fields[2])),
+        _ => {
+            return Err(format!(
+                "Assembly: expected Vec of JointDef, got {}",
+                fields[2]
+            ))
+        }
     };
 
     let mut joint_list = Vec::new();
@@ -467,6 +496,7 @@ fn is_solid_tag(tag: &str) -> bool {
             | "SweepHelix"
             | "Loft"
             | "LoftClosed"
+            | "ImportedMesh"
     )
 }
 
@@ -531,6 +561,20 @@ impl ConvertCtx {
             self.f64_val(&fields[offset + 1])?,
             self.f64_val(&fields[offset + 2])?,
         ))
+    }
+
+    fn f64_vec(&self, v: &Value) -> Result<Vec<f64>, String> {
+        match v {
+            Value::Vec(items) => items.iter().map(|item| self.f64_val(item)).collect(),
+            _ => Err(format!("expected Vec of numbers, got {v}")),
+        }
+    }
+
+    fn u32_vec(&self, v: &Value) -> Result<Vec<u32>, String> {
+        match v {
+            Value::Vec(items) => items.iter().map(|item| self.u32_val(item)).collect(),
+            _ => Err(format!("expected Vec of integers, got {v}")),
+        }
     }
 
     fn convert_solid(&mut self, value: &Value) -> Result<NodeId, String> {
@@ -750,6 +794,20 @@ impl ConvertCtx {
                 }
             }
 
+            // Imported mesh (positions, indices, normals)
+            "ImportedMesh" => {
+                assert_fields(tag, fields, 3)?;
+                let positions = self.f64_vec(&fields[0])?;
+                let indices = self.u32_vec(&fields[1])?;
+                let normals = self.f64_vec(&fields[2])?;
+                CsgOp::ImportedMesh {
+                    positions,
+                    indices,
+                    normals: Some(normals),
+                    source: None,
+                }
+            }
+
             _ => return Err(format!("unknown Solid variant: {tag}")),
         };
 
@@ -796,7 +854,10 @@ impl ConvertCtx {
             _ => return Err(format!("expected Vec of SketchSeg, got {value}")),
         };
 
-        items.iter().map(|item| self.convert_sketch_seg(item)).collect()
+        items
+            .iter()
+            .map(|item| self.convert_sketch_seg(item))
+            .collect()
     }
 
     fn convert_sketch_seg(&self, value: &Value) -> Result<SketchSegment2D, String> {
@@ -878,9 +939,7 @@ mod tests {
         let val = adt("Cylinder", vec![f(5.0), f(15.0)]);
         let doc = value_to_document(&val).unwrap();
         match &doc.nodes[&0].op {
-            CsgOp::Cylinder {
-                radius, height, ..
-            } => {
+            CsgOp::Cylinder { radius, height, .. } => {
                 assert_eq!(*radius, 5.0);
                 assert_eq!(*height, 15.0);
             }
@@ -963,15 +1022,9 @@ mod tests {
     fn vec_of_entries() {
         let entry1 = adt(
             "SceneEntry",
-            vec![
-                adt("Cube", vec![f(10.0), f(10.0), f(10.0)]),
-                s("steel"),
-            ],
+            vec![adt("Cube", vec![f(10.0), f(10.0), f(10.0)]), s("steel")],
         );
-        let entry2 = adt(
-            "SceneEntry",
-            vec![adt("Sphere", vec![f(5.0)]), s("glass")],
-        );
+        let entry2 = adt("SceneEntry", vec![adt("Sphere", vec![f(5.0)]), s("glass")]);
         let vec_val = Value::Vec(vec![entry1, entry2]);
         let doc = value_to_document(&vec_val).unwrap();
         assert_eq!(doc.roots.len(), 2);
@@ -989,9 +1042,15 @@ mod tests {
         let sketch = adt(
             "Sketch",
             vec![
-                f(0.0), f(0.0), f(0.0), // origin
-                f(1.0), f(0.0), f(0.0), // x_dir
-                f(0.0), f(1.0), f(0.0), // y_dir
+                f(0.0),
+                f(0.0),
+                f(0.0), // origin
+                f(1.0),
+                f(0.0),
+                f(0.0), // x_dir
+                f(0.0),
+                f(1.0),
+                f(0.0), // y_dir
                 Value::Vec(vec![line1, line2, line3, line4]),
             ],
         );
@@ -1049,9 +1108,7 @@ mod tests {
         );
         let doc = value_to_document(&pat).unwrap();
         match &doc.nodes[&1].op {
-            CsgOp::LinearPattern {
-                count, spacing, ..
-            } => {
+            CsgOp::LinearPattern { count, spacing, .. } => {
                 assert_eq!(*count, 5);
                 assert_eq!(*spacing, 25.0);
             }
@@ -1066,8 +1123,12 @@ mod tests {
             "CircularPattern",
             vec![
                 cube,
-                f(0.0), f(0.0), f(0.0), // axis_origin
-                f(0.0), f(0.0), f(1.0), // axis_dir
+                f(0.0),
+                f(0.0),
+                f(0.0), // axis_origin
+                f(0.0),
+                f(0.0),
+                f(1.0), // axis_dir
                 i(8),
                 f(360.0),
             ],
@@ -1075,9 +1136,7 @@ mod tests {
         let doc = value_to_document(&pat).unwrap();
         match &doc.nodes[&1].op {
             CsgOp::CircularPattern {
-                count,
-                angle_deg,
-                ..
+                count, angle_deg, ..
             } => {
                 assert_eq!(*count, 8);
                 assert_eq!(*angle_deg, 360.0);
@@ -1153,9 +1212,15 @@ mod tests {
         let sketch = adt(
             "Sketch",
             vec![
-                f(0.0), f(0.0), f(0.0),
-                f(1.0), f(0.0), f(0.0),
-                f(0.0), f(1.0), f(0.0),
+                f(0.0),
+                f(0.0),
+                f(0.0),
+                f(1.0),
+                f(0.0),
+                f(0.0),
+                f(0.0),
+                f(1.0),
+                f(0.0),
                 Value::Vec(vec![line1, line2, line3, line4]),
             ],
         );
@@ -1183,16 +1248,19 @@ mod tests {
         let sketch = adt(
             "Sketch",
             vec![
-                f(0.0), f(0.0), f(0.0),
-                f(1.0), f(0.0), f(0.0),
-                f(0.0), f(1.0), f(0.0),
+                f(0.0),
+                f(0.0),
+                f(0.0),
+                f(1.0),
+                f(0.0),
+                f(0.0),
+                f(0.0),
+                f(1.0),
+                f(0.0),
                 Value::Vec(vec![line1, line2, line3, line4]),
             ],
         );
-        let sweep = adt(
-            "SweepHelix",
-            vec![sketch, f(10.0), f(5.0), f(20.0), f(4.0)],
-        );
+        let sweep = adt("SweepHelix", vec![sketch, f(10.0), f(5.0), f(20.0), f(4.0)]);
         let doc = value_to_document(&sweep).unwrap();
         match &doc.nodes[&1].op {
             CsgOp::Sweep { path, .. } => match path {
@@ -1216,14 +1284,23 @@ mod tests {
             adt(
                 "Sketch",
                 vec![
-                    f(0.0), f(y), f(0.0),
-                    f(1.0), f(0.0), f(0.0),
-                    f(0.0), f(0.0), f(1.0),
+                    f(0.0),
+                    f(y),
+                    f(0.0),
+                    f(1.0),
+                    f(0.0),
+                    f(0.0),
+                    f(0.0),
+                    f(0.0),
+                    f(1.0),
                     Value::Vec(vec![l1, l2, l3, l4]),
                 ],
             )
         };
-        let loft = adt("Loft", vec![Value::Vec(vec![mk_sketch(0.0), mk_sketch(20.0)])]);
+        let loft = adt(
+            "Loft",
+            vec![Value::Vec(vec![mk_sketch(0.0), mk_sketch(20.0)])],
+        );
         let doc = value_to_document(&loft).unwrap();
         assert_eq!(doc.nodes.len(), 3); // 2 sketches + loft
         match &doc.nodes[&2].op {
@@ -1243,16 +1320,27 @@ mod tests {
             adt(
                 "Sketch",
                 vec![
-                    f(0.0), f(y), f(0.0),
-                    f(1.0), f(0.0), f(0.0),
-                    f(0.0), f(0.0), f(1.0),
+                    f(0.0),
+                    f(y),
+                    f(0.0),
+                    f(1.0),
+                    f(0.0),
+                    f(0.0),
+                    f(0.0),
+                    f(0.0),
+                    f(1.0),
                     Value::Vec(vec![l1, l2]),
                 ],
             )
         };
-        let loft = adt("LoftClosed", vec![Value::Vec(vec![
-            mk_sketch(0.0), mk_sketch(10.0), mk_sketch(20.0),
-        ])]);
+        let loft = adt(
+            "LoftClosed",
+            vec![Value::Vec(vec![
+                mk_sketch(0.0),
+                mk_sketch(10.0),
+                mk_sketch(20.0),
+            ])],
+        );
         let doc = value_to_document(&loft).unwrap();
         match &doc.nodes[&3].op {
             CsgOp::Loft { sketches, closed } => {
@@ -1260,6 +1348,91 @@ mod tests {
                 assert_eq!(*closed, Some(true));
             }
             _ => panic!("expected Loft"),
+        }
+    }
+
+    #[test]
+    fn imported_mesh_to_document() {
+        let positions = Value::Vec(vec![
+            f(0.0),
+            f(0.0),
+            f(0.0),
+            f(10.0),
+            f(0.0),
+            f(0.0),
+            f(0.0),
+            f(10.0),
+            f(0.0),
+        ]);
+        let indices = Value::Vec(vec![i(0), i(1), i(2)]);
+        let normals = Value::Vec(vec![
+            f(0.0),
+            f(0.0),
+            f(1.0),
+            f(0.0),
+            f(0.0),
+            f(1.0),
+            f(0.0),
+            f(0.0),
+            f(1.0),
+        ]);
+        let val = adt("ImportedMesh", vec![positions, indices, normals]);
+        let doc = value_to_document(&val).unwrap();
+        assert_eq!(doc.roots.len(), 1);
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[&0].op {
+            CsgOp::ImportedMesh {
+                positions,
+                indices,
+                normals,
+                source,
+            } => {
+                assert_eq!(positions.len(), 9);
+                assert_eq!(indices.len(), 3);
+                assert!(normals.is_some());
+                assert_eq!(normals.as_ref().unwrap().len(), 9);
+                assert!(source.is_none());
+            }
+            _ => panic!("expected ImportedMesh"),
+        }
+    }
+
+    #[test]
+    fn imported_mesh_in_difference() {
+        let cube = adt("Cube", vec![f(20.0), f(20.0), f(20.0)]);
+        let positions = Value::Vec(vec![
+            f(0.0),
+            f(0.0),
+            f(0.0),
+            f(5.0),
+            f(0.0),
+            f(0.0),
+            f(0.0),
+            f(5.0),
+            f(0.0),
+        ]);
+        let indices = Value::Vec(vec![i(0), i(1), i(2)]);
+        let normals = Value::Vec(vec![
+            f(0.0),
+            f(0.0),
+            f(1.0),
+            f(0.0),
+            f(0.0),
+            f(1.0),
+            f(0.0),
+            f(0.0),
+            f(1.0),
+        ]);
+        let mesh = adt("ImportedMesh", vec![positions, indices, normals]);
+        let diff = adt("Difference", vec![cube, mesh]);
+        let doc = value_to_document(&diff).unwrap();
+        assert_eq!(doc.nodes.len(), 3); // cube + imported_mesh + difference
+        match &doc.nodes[&2].op {
+            CsgOp::Difference { left, right } => {
+                assert_eq!(*left, 0); // cube
+                assert_eq!(*right, 1); // imported_mesh
+            }
+            _ => panic!("expected Difference"),
         }
     }
 
@@ -1273,28 +1446,52 @@ mod tests {
     fn assembly_to_document() {
         // Build: Assembly([parts], [instances], [joints], ground)
         let parts = Value::Vec(vec![
-            adt("PartEntry", vec![
-                s("base"), adt("Cylinder", vec![f(40.0), f(30.0)]), s("steel"),
-            ]),
-            adt("PartEntry", vec![
-                s("arm1"), adt("Cube", vec![f(80.0), f(20.0), f(20.0)]), s("aluminum"),
-            ]),
+            adt(
+                "PartEntry",
+                vec![
+                    s("base"),
+                    adt("Cylinder", vec![f(40.0), f(30.0)]),
+                    s("steel"),
+                ],
+            ),
+            adt(
+                "PartEntry",
+                vec![
+                    s("arm1"),
+                    adt("Cube", vec![f(80.0), f(20.0), f(20.0)]),
+                    s("aluminum"),
+                ],
+            ),
         ]);
         let instances = Value::Vec(vec![
-            adt("InstanceEntry", vec![s("base-inst"), s("base"), f(0.0), f(0.0), f(0.0)]),
-            adt("InstanceEntry", vec![s("arm1-inst"), s("arm1"), f(0.0), f(0.0), f(30.0)]),
+            adt(
+                "InstanceEntry",
+                vec![s("base-inst"), s("base"), f(0.0), f(0.0), f(0.0)],
+            ),
+            adt(
+                "InstanceEntry",
+                vec![s("arm1-inst"), s("arm1"), f(0.0), f(0.0), f(30.0)],
+            ),
         ]);
-        let joints = Value::Vec(vec![
-            adt("RevoluteJoint", vec![
+        let joints = Value::Vec(vec![adt(
+            "RevoluteJoint",
+            vec![
                 s("shoulder"),
-                f(0.0), f(1.0), f(0.0),     // axis
-                f(-90.0), f(90.0),           // limits
-                s("base-inst"),              // parent
-                f(0.0), f(0.0), f(25.0),    // parent anchor
-                s("arm1-inst"),              // child
-                f(0.0), f(0.0), f(0.0),     // child anchor
-            ]),
-        ]);
+                f(0.0),
+                f(1.0),
+                f(0.0), // axis
+                f(-90.0),
+                f(90.0),        // limits
+                s("base-inst"), // parent
+                f(0.0),
+                f(0.0),
+                f(25.0),        // parent anchor
+                s("arm1-inst"), // child
+                f(0.0),
+                f(0.0),
+                f(0.0), // child anchor
+            ],
+        )]);
         let ground = s("base-inst");
         let assembly = adt("Assembly", vec![parts, instances, joints, ground]);
 
@@ -1340,22 +1537,74 @@ mod tests {
     #[test]
     fn assembly_with_multiple_joint_types() {
         let parts = Value::Vec(vec![
-            adt("PartEntry", vec![s("a"), adt("Cube", vec![f(10.0), f(10.0), f(10.0)]), s("default")]),
-            adt("PartEntry", vec![s("b"), adt("Cube", vec![f(10.0), f(10.0), f(10.0)]), s("default")]),
-            adt("PartEntry", vec![s("c"), adt("Cube", vec![f(10.0), f(10.0), f(10.0)]), s("default")]),
+            adt(
+                "PartEntry",
+                vec![
+                    s("a"),
+                    adt("Cube", vec![f(10.0), f(10.0), f(10.0)]),
+                    s("default"),
+                ],
+            ),
+            adt(
+                "PartEntry",
+                vec![
+                    s("b"),
+                    adt("Cube", vec![f(10.0), f(10.0), f(10.0)]),
+                    s("default"),
+                ],
+            ),
+            adt(
+                "PartEntry",
+                vec![
+                    s("c"),
+                    adt("Cube", vec![f(10.0), f(10.0), f(10.0)]),
+                    s("default"),
+                ],
+            ),
         ]);
         let instances = Value::Vec(vec![
-            adt("InstanceEntry", vec![s("a-inst"), s("a"), f(0.0), f(0.0), f(0.0)]),
-            adt("InstanceEntry", vec![s("b-inst"), s("b"), f(0.0), f(0.0), f(0.0)]),
-            adt("InstanceEntry", vec![s("c-inst"), s("c"), f(0.0), f(0.0), f(0.0)]),
+            adt(
+                "InstanceEntry",
+                vec![s("a-inst"), s("a"), f(0.0), f(0.0), f(0.0)],
+            ),
+            adt(
+                "InstanceEntry",
+                vec![s("b-inst"), s("b"), f(0.0), f(0.0), f(0.0)],
+            ),
+            adt(
+                "InstanceEntry",
+                vec![s("c-inst"), s("c"), f(0.0), f(0.0), f(0.0)],
+            ),
         ]);
         let joints = Value::Vec(vec![
-            adt("FixedJoint", vec![
-                s("fix"), s("a-inst"), f(0.0), f(0.0), f(5.0), s("b-inst"), f(0.0), f(0.0), f(0.0),
-            ]),
-            adt("BallJoint", vec![
-                s("ball"), s("b-inst"), f(0.0), f(0.0), f(5.0), s("c-inst"), f(0.0), f(0.0), f(0.0),
-            ]),
+            adt(
+                "FixedJoint",
+                vec![
+                    s("fix"),
+                    s("a-inst"),
+                    f(0.0),
+                    f(0.0),
+                    f(5.0),
+                    s("b-inst"),
+                    f(0.0),
+                    f(0.0),
+                    f(0.0),
+                ],
+            ),
+            adt(
+                "BallJoint",
+                vec![
+                    s("ball"),
+                    s("b-inst"),
+                    f(0.0),
+                    f(0.0),
+                    f(5.0),
+                    s("c-inst"),
+                    f(0.0),
+                    f(0.0),
+                    f(0.0),
+                ],
+            ),
         ]);
         let assembly = adt("Assembly", vec![parts, instances, joints, s("a-inst")]);
         let doc = value_to_document(&assembly).unwrap();
@@ -1375,9 +1624,15 @@ mod tests {
         let sketch = adt(
             "Sketch",
             vec![
-                f(0.0), f(0.0), f(0.0),
-                f(1.0), f(0.0), f(0.0),
-                f(0.0), f(1.0), f(0.0),
+                f(0.0),
+                f(0.0),
+                f(0.0),
+                f(1.0),
+                f(0.0),
+                f(0.0),
+                f(0.0),
+                f(1.0),
+                f(0.0),
                 Value::Vec(vec![line1, line2, line3, line4]),
             ],
         );
@@ -1385,9 +1640,13 @@ mod tests {
             "Revolve",
             vec![
                 sketch,
-                f(0.0), f(0.0), f(0.0), // axis origin
-                f(0.0), f(1.0), f(0.0), // axis dir
-                f(360.0),               // angle
+                f(0.0),
+                f(0.0),
+                f(0.0), // axis origin
+                f(0.0),
+                f(1.0),
+                f(0.0),   // axis dir
+                f(360.0), // angle
             ],
         );
         let doc = value_to_document(&revolve).unwrap();
@@ -1403,16 +1662,27 @@ mod tests {
         let arc = adt(
             "SArc",
             vec![
-                f(0.0), f(0.0), f(10.0), f(0.0), f(5.0), f(0.0),
+                f(0.0),
+                f(0.0),
+                f(10.0),
+                f(0.0),
+                f(5.0),
+                f(0.0),
                 Value::Bool(true),
             ],
         );
         let sketch = adt(
             "Sketch",
             vec![
-                f(0.0), f(0.0), f(0.0),
-                f(1.0), f(0.0), f(0.0),
-                f(0.0), f(1.0), f(0.0),
+                f(0.0),
+                f(0.0),
+                f(0.0),
+                f(1.0),
+                f(0.0),
+                f(0.0),
+                f(0.0),
+                f(1.0),
+                f(0.0),
                 Value::Vec(vec![arc]),
             ],
         );
